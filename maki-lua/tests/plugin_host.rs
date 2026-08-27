@@ -3076,6 +3076,63 @@ fn bash_permission_scopes_never_falls_back_to_json(command: &str) {
     );
 }
 
+#[test]
+fn bash_permission_scopes_atomizes_compound_statements() {
+    let (reg, _host) = builtins_host();
+    let entry = reg.get("bash").expect("bash registered");
+
+    let scopes_for = |command: &str| {
+        let input = serde_json::json!({ "command": command });
+        let inv = entry.tool.parse(&input).expect("parse failed");
+        smol::block_on(inv.permission_scopes()).expect("permission_scopes returned None")
+    };
+
+    let cases: [(&str, &[&str], bool); 7] = [
+        ("git status", &["git status"], false),
+        ("for i in a b; do rm -rf x; done", &["rm -rf x"], false),
+        (
+            "(diff a b && echo yes) || echo no",
+            &["diff a b", "echo yes", "echo no"],
+            false,
+        ),
+        (
+            "if git diff --quiet; then echo clean; else echo dirty; fi",
+            &["git diff --quiet", "echo clean", "echo dirty"],
+            false,
+        ),
+        (
+            "cd /tmp && (diff a b && echo yes) || echo no && rm -f x",
+            &["cd /tmp", "diff a b", "echo yes", "echo no", "rm -f x"],
+            false,
+        ),
+        ("echo $(whoami)", &["echo $(whoami)"], true),
+        (
+            "cargo test && echo \"$(date)\"",
+            &["cargo test", "echo \"$(date)\""],
+            true,
+        ),
+    ];
+
+    for (command, expected, force) in cases {
+        let scopes = scopes_for(command);
+        for scope in expected {
+            assert!(
+                scopes.scopes.iter().any(|s| s == scope),
+                "command {command:?}: missing scope {scope:?} in {:?}",
+                scopes.scopes
+            );
+        }
+        assert_eq!(scopes.force_prompt, force, "command {command:?}");
+    }
+
+    let for_loop = scopes_for("for i in a b; do rm -rf x; done");
+    assert!(
+        for_loop.scopes.iter().all(|s| !s.starts_with("for ")),
+        "for loop kept as an opaque scope: {:?}",
+        for_loop.scopes
+    );
+}
+
 fn exec_tool_with_perms(
     perms: maki_lua::PluginPermissions,
     src: &str,

@@ -176,7 +176,6 @@ local cwd = maki.uv.cwd() or "."
 local COMPLEX_TYPES = {
   command_substitution = true,
   process_substitution = true,
-  subshell = true,
   arithmetic_expansion = true,
 }
 
@@ -192,46 +191,28 @@ local function is_complex(node)
   return false
 end
 
-local LEAF_COMMAND_TYPES = {
+local EMIT_TYPES = {
   command = true,
   redirected_statement = true,
-  negated_command = true,
-  subshell = true,
-  compound_statement = true,
-  if_statement = true,
-  while_statement = true,
-  for_statement = true,
-  case_statement = true,
-  function_definition = true,
-  c_style_for_statement = true,
 }
 
-local function collect_commands(node, source)
-  local out = {}
+local function collect_commands(node, source, state)
   local kind = node:type()
-  if kind == "program" or kind == "list" then
-    for child in node:iter_children() do
-      local nested = collect_commands(child, source)
-      for _, cmd in ipairs(nested) do
-        out[#out + 1] = cmd
-      end
-    end
-  elseif kind == "pipeline" then
-    for child in node:iter_children() do
-      if child:named() then
-        local text = maki.treesitter.get_node_text(child, source):match("^%s*(.-)%s*$")
-        if text ~= "" then
-          out[#out + 1] = text
-        end
-      end
-    end
-  elseif LEAF_COMMAND_TYPES[kind] then
+  if EMIT_TYPES[kind] then
     local text = maki.treesitter.get_node_text(node, source):match("^%s*(.-)%s*$")
     if text ~= "" then
-      out[#out + 1] = text
+      state.segments[#state.segments + 1] = text
+      if is_complex(node) then
+        state.force_prompt = true
+      end
+    end
+    return
+  end
+  for child in node:iter_children() do
+    if child:named() then
+      collect_commands(child, source, state)
     end
   end
-  return out
 end
 
 local description = [[Execute a bash command.
@@ -283,15 +264,16 @@ maki.api.register_tool({
     end
 
     local root = parser:parse()[1]:root()
-    if root:has_error() or is_complex(root) then
+    if root:has_error() then
       return { scopes = { command }, force_prompt = true }
     end
 
-    local segments = collect_commands(root, command)
-    if #segments == 0 then
-      segments = { command }
+    local state = { segments = {}, force_prompt = false }
+    collect_commands(root, command, state)
+    if #state.segments == 0 then
+      return { scopes = { command }, force_prompt = true }
     end
-    return { scopes = segments, force_prompt = false }
+    return { scopes = state.segments, force_prompt = state.force_prompt }
   end,
 
   header = function(input)
