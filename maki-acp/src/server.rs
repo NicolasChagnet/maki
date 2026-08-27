@@ -782,14 +782,19 @@ fn start_event_pump(
                 AgentEvent::ToolOutput { id, content } => translate::tool_output(&id, &content),
                 AgentEvent::ToolDone(event) => translate::tool_done(&event, &cwd, home.as_deref()),
                 AgentEvent::TurnComplete(event) => translate::usage_update(&event, cost_total),
-                AgentEvent::PermissionRequest { id, tool, scopes } => {
+                AgentEvent::PermissionRequest {
+                    id,
+                    tool,
+                    scopes,
+                    force_prompt,
+                } => {
                     let fields =
                         ToolCallUpdateFields::new().title(format!("{tool}: {}", scopes.join(", ")));
                     let request =
                         AgentRequest::RequestPermissionRequest(RequestPermissionRequest::new(
                             sid.clone(),
                             ToolCallUpdate::new(ToolCallId::from(id), fields),
-                            permissions::permission_options(),
+                            permissions::permission_options(force_prompt),
                         ));
                     ask_client(&out_tx, &pending, AskKind::Permission, request);
                     continue;

@@ -1187,9 +1187,15 @@ impl App {
             return vec![];
         }
 
-        if let ChatEventResult::PermissionRequest { id, tool, scopes } = result {
+        if let ChatEventResult::PermissionRequest {
+            id,
+            tool,
+            scopes,
+            force_prompt,
+        } = result
+        {
             self.permission_prompt
-                .open(id, tool, scopes, subagent_id.clone());
+                .open(id, tool, scopes, subagent_id.clone(), force_prompt);
             return vec![];
         }
 

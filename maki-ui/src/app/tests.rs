@@ -4135,6 +4135,7 @@ fn ctrl_c_denies_permission_prompt() {
         maki_config::ToolKey::native("bash"),
         vec!["execute".into()],
         None,
+        false,
     );
     assert!(app.permission_prompt.is_open());
 
@@ -4275,6 +4276,7 @@ fn permission_prompt_takes_bottom_precedence_over_below_split() {
         maki_config::ToolKey::native("bash"),
         vec!["ls".into()],
         None,
+        false,
     );
 
     let (_msg, _bottom, _status, _input, splits) = app.layout_geometry(TEST_AREA);
@@ -4485,6 +4487,7 @@ fn attention_prioritizes_permission_and_normalizes_tool() {
         maki_config::ToolKey::native("bash"),
         vec!["execute".into()],
         None,
+        false,
     );
     assert_eq!(
         app.attention(),
@@ -4493,8 +4496,13 @@ fn attention_prioritizes_permission_and_normalizes_tool() {
         })
     );
 
-    app.permission_prompt
-        .open("id".into(), maki_config::ToolKey::Wildcard, vec![], None);
+    app.permission_prompt.open(
+        "id".into(),
+        maki_config::ToolKey::Wildcard,
+        vec![],
+        None,
+        false,
+    );
     assert_eq!(
         app.attention(),
         Some(Notification::PermissionRequested { tool: None })

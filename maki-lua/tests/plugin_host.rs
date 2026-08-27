@@ -3076,60 +3076,44 @@ fn bash_permission_scopes_never_falls_back_to_json(command: &str) {
     );
 }
 
-#[test]
-fn bash_permission_scopes_atomizes_compound_statements() {
+#[test_case::test_case("git status", &["git status"], false ; "simple")]
+#[test_case::test_case("for i in a b; do rm -rf x; done", &["rm -rf x"], false ; "for_loop_reduces_to_body")]
+#[test_case::test_case("(diff a b && echo yes) || echo no", &["diff a b", "echo yes", "echo no"], false ; "subshell_and_list")]
+#[test_case::test_case("if git diff --quiet; then echo clean; else echo dirty; fi", &["git diff --quiet", "echo clean", "echo dirty"], false ; "if_else_reduces_to_leaves")]
+#[test_case::test_case("cd /tmp && (diff a b && echo yes) || echo no && rm -f x", &["cd /tmp", "diff a b", "echo yes", "echo no", "rm -f x"], false ; "chained_with_subshell")]
+#[test_case::test_case("echo $(whoami)", &["echo $(whoami)"], true ; "command_substitution_forces")]
+#[test_case::test_case("cargo test && echo \"$(date)\"", &["cargo test", "echo \"$(date)\""], true ; "complex_leaf_forces_prompt")]
+fn bash_permission_scopes_atomize_compound_statements(
+    command: &str,
+    expected: &[&str],
+    force: bool,
+) {
     let (reg, _host) = builtins_host();
     let entry = reg.get("bash").expect("bash registered");
-
-    let scopes_for = |command: &str| {
-        let input = serde_json::json!({ "command": command });
-        let inv = entry.tool.parse(&input).expect("parse failed");
-        smol::block_on(inv.permission_scopes()).expect("permission_scopes returned None")
-    };
-
-    let cases: [(&str, &[&str], bool); 7] = [
-        ("git status", &["git status"], false),
-        ("for i in a b; do rm -rf x; done", &["rm -rf x"], false),
-        (
-            "(diff a b && echo yes) || echo no",
-            &["diff a b", "echo yes", "echo no"],
-            false,
-        ),
-        (
-            "if git diff --quiet; then echo clean; else echo dirty; fi",
-            &["git diff --quiet", "echo clean", "echo dirty"],
-            false,
-        ),
-        (
-            "cd /tmp && (diff a b && echo yes) || echo no && rm -f x",
-            &["cd /tmp", "diff a b", "echo yes", "echo no", "rm -f x"],
-            false,
-        ),
-        ("echo $(whoami)", &["echo $(whoami)"], true),
-        (
-            "cargo test && echo \"$(date)\"",
-            &["cargo test", "echo \"$(date)\""],
-            true,
-        ),
-    ];
-
-    for (command, expected, force) in cases {
-        let scopes = scopes_for(command);
-        for scope in expected {
-            assert!(
-                scopes.scopes.iter().any(|s| s == scope),
-                "command {command:?}: missing scope {scope:?} in {:?}",
-                scopes.scopes
-            );
-        }
-        assert_eq!(scopes.force_prompt, force, "command {command:?}");
+    let input = serde_json::json!({ "command": command });
+    let inv = entry.tool.parse(&input).expect("parse failed");
+    let scopes = smol::block_on(inv.permission_scopes()).expect("permission_scopes returned None");
+    for scope in expected {
+        assert!(
+            scopes.scopes.iter().any(|s| s == scope),
+            "command {command:?}: missing scope {scope:?} in {:?}",
+            scopes.scopes
+        );
     }
+    assert_eq!(scopes.force_prompt, force, "command {command:?}");
+}
 
-    let for_loop = scopes_for("for i in a b; do rm -rf x; done");
+#[test]
+fn bash_for_loop_never_emits_an_opaque_scope() {
+    let (reg, _host) = builtins_host();
+    let entry = reg.get("bash").expect("bash registered");
+    let input = serde_json::json!({ "command": "for i in a b; do rm -rf x; done" });
+    let inv = entry.tool.parse(&input).expect("parse failed");
+    let scopes = smol::block_on(inv.permission_scopes()).expect("permission_scopes returned None");
     assert!(
-        for_loop.scopes.iter().all(|s| !s.starts_with("for ")),
+        scopes.scopes.iter().all(|s| !s.starts_with("for ")),
         "for loop kept as an opaque scope: {:?}",
-        for_loop.scopes
+        scopes.scopes
     );
 }
 

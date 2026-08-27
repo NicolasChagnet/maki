@@ -597,6 +597,7 @@ pub enum AgentEvent {
         id: String,
         tool: ToolKey,
         scopes: Vec<String>,
+        force_prompt: bool,
     },
     AuthRequired,
     Nudge,

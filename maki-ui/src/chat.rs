@@ -42,6 +42,7 @@ pub enum ChatEventResult {
         id: String,
         tool: ToolKey,
         scopes: Vec<String>,
+        force_prompt: bool,
     },
     AuthRequired,
 }
@@ -161,8 +162,18 @@ impl Chat {
                 self.messages_panel.flush();
                 return ChatEventResult::Error(message);
             }
-            AgentEvent::PermissionRequest { id, tool, scopes } => {
-                return ChatEventResult::PermissionRequest { id, tool, scopes };
+            AgentEvent::PermissionRequest {
+                id,
+                tool,
+                scopes,
+                force_prompt,
+            } => {
+                return ChatEventResult::PermissionRequest {
+                    id,
+                    tool,
+                    scopes,
+                    force_prompt,
+                };
             }
             AgentEvent::AuthRequired => {
                 return ChatEventResult::AuthRequired;

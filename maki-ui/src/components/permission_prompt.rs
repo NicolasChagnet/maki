@@ -130,12 +130,17 @@ impl PermissionPrompt {
         tool: ToolKey,
         scopes: Vec<String>,
         subagent_id: Option<String>,
+        force_prompt: bool,
     ) {
-        let allow_scopes = generalized_scopes(&tool, &scopes);
-        let allow_scopes = if allow_scopes == scopes {
+        let allow_scopes = if force_prompt {
             vec![]
         } else {
-            allow_scopes
+            let allow_scopes = generalized_scopes(&tool, &scopes);
+            if allow_scopes == scopes {
+                vec![]
+            } else {
+                allow_scopes
+            }
         };
         *self = Self::Open {
             id,
@@ -384,8 +389,41 @@ mod tests {
             ToolKey::native("bash"),
             vec!["execute".into()],
             None,
+            false,
         );
         prompt
+    }
+
+    #[test]
+    fn force_prompt_hides_allow_suggestion() {
+        let mut prompt = PermissionPrompt::new();
+        prompt.open(
+            "id".into(),
+            ToolKey::native("bash"),
+            vec!["cargo test".into()],
+            None,
+            true,
+        );
+        let PermissionPrompt::Open { allow_scopes, .. } = &prompt else {
+            panic!("prompt should be open");
+        };
+        assert!(allow_scopes.is_empty());
+    }
+
+    #[test]
+    fn non_force_prompt_shows_allow_suggestion() {
+        let mut prompt = PermissionPrompt::new();
+        prompt.open(
+            "id".into(),
+            ToolKey::native("bash"),
+            vec!["cargo test".into()],
+            None,
+            false,
+        );
+        let PermissionPrompt::Open { allow_scopes, .. } = &prompt else {
+            panic!("prompt should be open");
+        };
+        assert_eq!(allow_scopes, &vec!["cargo *"]);
     }
 
     fn ctrl_c() -> KeyEvent {
@@ -469,7 +507,7 @@ mod tests {
     #[test]
     fn wildcard_tool_key_opens() {
         let mut prompt = PermissionPrompt::new();
-        prompt.open("id".into(), ToolKey::Wildcard, vec![], None);
+        prompt.open("id".into(), ToolKey::Wildcard, vec![], None, false);
         assert!(matches!(prompt, PermissionPrompt::Open { .. }));
     }
 }

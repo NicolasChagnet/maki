@@ -595,6 +595,7 @@ impl PermissionManager {
             id: request_id.to_owned(),
             tool: t2.clone(),
             scopes: s2.clone(),
+            force_prompt,
         });
         let response = cancel.race(guard.recv_async()).await;
         drop(guard);
