@@ -20,16 +20,20 @@ use maki_agent::tools::{
 use maki_agent::{
     Agent, AgentEvent, AgentInput, AgentMode, AgentParams, AgentRunParams, DoneReason,
     EMPTY_RESPONSE_MARKER, Envelope, EventSender, History, McpSession, SubagentInfo, ToolDoneEvent,
+    ToolOutput,
 };
 use maki_lua_macro::{lua_class, lua_fn, lua_table};
 use maki_providers::model::ModelTier;
 use maki_providers::provider;
-use maki_providers::{ContentBlock, Model, ModelError, Role, ThinkingConfig, TokenUsage, add_cost};
-use maki_storage::id::MakiId;
-use maki_storage::sessions::StoredThinking;
+use maki_providers::{
+    ContentBlock, Message, Model, ModelError, Role, ThinkingConfig, TokenUsage, add_cost,
+};
+use maki_storage::StateDir;
+use maki_storage::id::{MakiId, SessionRef};
+use maki_storage::sessions::{Session, StoredThinking};
 use mlua::{Function, IntoLuaMulti, Lua, Result as LuaResult, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::api::tool::{audiences_to_lua, parse_audience};
 use crate::api::ui::buf::BufHandle;
@@ -40,6 +44,36 @@ use crate::runtime::CANCELLED_MSG;
 
 const SESSION_CLOSED_ERR: &str = "session closed";
 const DEFAULT_SESSION_AUDIENCE: ToolAudience = ToolAudience::GENERAL_SUB;
+
+type StoredSession = Session<Message, TokenUsage, ToolOutput>;
+
+/// Loads the parent session's persisted messages so a forked subagent starts
+/// with the same context as its parent. Best-effort: without a session (e.g.
+/// a one-shot run) the subagent falls back to an empty history.
+fn fork_parent_history(agent_ctx: &AgentContext) -> History {
+    let Some(session_ref) = &agent_ctx.session_id else {
+        warn!("fork requested but no parent session id is available");
+        return History::new(Vec::new());
+    };
+    let Ok(storage) = StateDir::resolve() else {
+        warn!(session_id = %session_ref, "fork requested but state dir is unavailable");
+        return History::new(Vec::new());
+    };
+    fork_history_from(&storage, session_ref)
+}
+
+/// Seeds a history from a stored session's messages. A missing or unreadable
+/// parent falls back to an empty history; the caller decides that is acceptable
+/// rather than failing the whole subagent spawn.
+fn fork_history_from(storage: &StateDir, session_ref: &SessionRef) -> History {
+    match StoredSession::load(session_ref.id(), storage) {
+        Ok(session) => History::restored(session.take_messages()),
+        Err(e) => {
+            warn!(session_id = %session_ref, error = %e, "fork requested but parent session could not be loaded");
+            History::new(Vec::new())
+        }
+    }
+}
 
 fn resolve_model_from_ctx(ctx: &AgentContext, tier: Option<&str>) -> Result<Model, String> {
     let Some(tier_str) = tier else {
@@ -429,6 +463,10 @@ async fn call_tool(
 ///     `"max"`), or a budget integer (token count). Inherits parent setting
 ///     if omitted.
 ///   `fast` (boolean?) - use fast mode. Inherits parent setting if omitted.
+///   `fork` (boolean?) - seed the session with the parent's persisted history
+///     instead of starting empty. The parent session is loaded from disk at the
+///     last persisted turn boundary, like the CLI `--fork-session` flag. When
+///     no parent session exists the session still starts empty. Default: `false`.
 /// @return (Session?, string?) Session handle, or `(nil, err)` on failure.
 /// @example
 /// local tools = maki.agent.tools(ctx, { audience = "general_sub" })
@@ -463,6 +501,7 @@ async fn session(
     let fast: bool = opts
         .get::<Option<bool>>("fast")?
         .unwrap_or(agent_ctx.opts.fast);
+    let fork: bool = opts.get::<Option<bool>>("fork")?.unwrap_or(false);
     let mcp_enabled: bool = opts.get::<Option<bool>>("mcp")?.unwrap_or(true);
 
     let (model, provider): (Model, Arc<dyn provider::Provider>) = if let Some(ref spec) = model_spec
@@ -578,6 +617,11 @@ async fn session(
         .insert(ui_id.clone(), child_trigger);
 
     let name = name.unwrap_or_default();
+    let history = if fork {
+        fork_parent_history(&agent_ctx)
+    } else {
+        History::new(Vec::new())
+    };
     info!(name = %name, model = %model.id, "subagent session opened");
 
     let state = SessionState {
@@ -606,7 +650,7 @@ async fn session(
             .as_ref()
             .filter(|_| mcp_enabled)
             .map(McpSession::fresh),
-        history: History::new(Vec::new()),
+        history,
         sub_event_tx,
         child_cancel,
         answer_rx: Arc::new(AsyncMutex::new(answer_rx)),
@@ -1085,5 +1129,42 @@ mod tests {
                     .as_ref()
                     .is_some_and(|info| info.parent_tool_use_id == PARENT_ID)
         }));
+    }
+
+    #[test]
+    fn fork_history_from_seeds_parent_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut stored = StoredSession::new("test-model", "/tmp");
+        let parent: Vec<Message> = vec![
+            Message::user("set up the context".into()),
+            Message::user("remember this".into()),
+        ];
+        stored.replace_messages(parent.clone());
+        stored
+            .save(&StateDir::from_path(dir.path().to_path_buf()))
+            .unwrap();
+
+        let history = fork_history_from(
+            &StateDir::from_path(dir.path().to_path_buf()),
+            &SessionRef::from_id(stored.id),
+        );
+        let seeded = history.into_vec();
+        assert_eq!(seeded.len(), parent.len());
+        assert!(
+            seeded
+                .iter()
+                .zip(&parent)
+                .all(|(a, b)| a.first_text_content() == b.first_text_content())
+        );
+    }
+
+    #[test]
+    fn fork_history_from_missing_session_falls_back_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let history = fork_history_from(
+            &StateDir::from_path(dir.path().to_path_buf()),
+            &SessionRef::from_id(MakiId::generate()),
+        );
+        assert!(history.is_empty());
     }
 }

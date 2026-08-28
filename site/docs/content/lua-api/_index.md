@@ -986,6 +986,10 @@ and tool set.
     `"max"`), or a budget integer (token count). Inherits parent setting
     if omitted.
   - `fast` (`boolean?`) use fast mode. Inherits parent setting if omitted.
+  - `fork` (`boolean?`) seed the session with the parent's persisted history
+    instead of starting empty. The parent session is loaded from disk at the
+    last persisted turn boundary, like the CLI `--fork-session` flag. When
+    no parent session exists the session still starts empty. Default: `false`.
 
 **Returns:** ([`Session?`](#maki-agent-Session), `string?`) Session handle, or `(nil, err)` on failure.
 

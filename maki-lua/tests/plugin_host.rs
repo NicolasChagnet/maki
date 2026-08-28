@@ -4,14 +4,15 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use maki_agent::ToolOutput;
 use maki_agent::tools::{
     DescriptionContext, ExecFuture, HeaderFuture, HeaderResult, ParseError, Tool, ToolContext,
     ToolExecResult, ToolInvocation, ToolLive, ToolRegistry, ToolSource, timeout_annotation,
 };
+use maki_agent::{AgentEvent, Envelope, EventSender, ToolOutput};
 use maki_config::{AlwaysThinking, Effect, PluginsConfig, ToolKey, ToolOutputLines};
 use maki_lua::{PluginError, PluginHost, WARM_TOOL_CAP};
-use maki_storage::id::SessionRef;
+use maki_providers::Message;
+use maki_storage::id::{MakiId, SessionRef};
 #[cfg(unix)]
 use rustix::process::{Pid, test_kill_process_group};
 use serde_json::{Value, json};
@@ -3670,6 +3671,62 @@ fn session_opts_validation_rejects(opts: &str, expected: &str) {
     host.load_source("session_opts_plugin", &src).unwrap();
     let out = exec_tool(&reg, "session_opts_probe", serde_json::json!({})).unwrap();
     assert!(out.contains(expected), "got: {out}");
+}
+
+const FORK_PROBE_PLUGIN: &str = r#"
+maki.api.register_tool({
+    name = "fork_probe",
+    description = "test",
+    schema = { type = "object", properties = { fork = { type = "boolean" } }, additionalProperties = false },
+    audiences = { "main" },
+    handler = function(input, ctx)
+        local sess, err = maki.agent.session(ctx, { fork = input.fork or false })
+        if err ~= nil then return "session error: " .. err end
+        sess:close()
+        return "ok"
+    end
+})
+"#;
+
+/// Runs the fork probe with a stub ctx and returns whatever history the
+/// subagent reports on close (empty when the fork fell back).
+fn fork_probe_history(fork: bool, session_id: Option<SessionRef>) -> Vec<Message> {
+    let reg = fresh_registry();
+    let host = PluginHost::new(Arc::clone(&reg)).unwrap();
+    host.load_source("fork_probe_plugin", FORK_PROBE_PLUGIN)
+        .unwrap();
+    let (tx, rx) = flume::unbounded::<Envelope>();
+    let mut ctx = maki_agent::tools::test_support::stub_ctx_with(
+        &maki_agent::AgentMode::Build,
+        Some(&EventSender::new(tx, 0)),
+        None,
+    );
+    ctx.session_id = session_id;
+    let out = exec_with_ctx(&reg, "fork_probe", json!({"fork": fork}), &ctx).unwrap();
+    assert_eq!(out, "ok");
+    rx.drain()
+        .filter_map(|envelope| match envelope.event {
+            AgentEvent::SubagentHistory { messages, .. } => Some(messages),
+            _ => None,
+        })
+        .next()
+        .unwrap_or_default()
+}
+
+#[test]
+fn fork_session_without_a_parent_falls_back_to_an_empty_history() {
+    assert!(fork_probe_history(true, None).is_empty());
+}
+
+#[test]
+fn fork_session_with_an_unknown_parent_id_falls_back_to_an_empty_history() {
+    let session = SessionRef::from_id(MakiId::generate());
+    assert!(fork_probe_history(true, Some(session)).is_empty());
+}
+
+#[test]
+fn fork_false_keeps_the_history_empty() {
+    assert!(fork_probe_history(false, None).is_empty());
 }
 
 fn load_img_tool(host: &PluginHost) {

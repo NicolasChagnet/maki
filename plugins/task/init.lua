@@ -79,6 +79,11 @@ local schema = {
     output_schema = {
       description = "JSON Schema (object) the subagent's final result must match. When set, the result is returned as a validated JSON string.",
     },
+    fork_session = {
+      type = "boolean",
+      default = false,
+      description = "If true, seed the subagent with the full session history up to the last persisted turn, instead of an empty context. Costly: each forked subagent replays the whole parent context.",
+    },
   },
 }
 
@@ -186,6 +191,7 @@ local function handler(input, ctx)
       local_tools = local_tools,
       audience = audience,
       name = input.description,
+      fork = input.fork_session,
     })
     if sess_err then
       return { llm_output = sess_err, is_error = true }
