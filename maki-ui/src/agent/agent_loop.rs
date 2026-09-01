@@ -47,6 +47,7 @@ pub(super) struct AgentLoop {
     lua_handle: EventHandle,
     subagent_cancels: Arc<CancelMap<String>>,
     model_policy: Arc<ModelPolicy>,
+    prompt_overrides: maki_agent::prompt::PromptOverrides,
 }
 
 impl AgentLoop {
@@ -97,6 +98,7 @@ impl AgentLoop {
             lua_handle,
             subagent_cancels,
             model_policy,
+            prompt_overrides: maki_agent::prompt::PromptOverrides::load(),
         }
     }
 
@@ -241,6 +243,7 @@ impl AgentLoop {
             &self.instructions.text,
             &prompt_slots,
             &slot.model,
+            &self.prompt_overrides,
         );
         self.publish_btw_system(&prompt_slots);
         let (trigger, cancel) = CancelToken::new();
@@ -324,6 +327,7 @@ impl AgentLoop {
             &self.instructions.text,
             prompt_slots,
             &slot.model,
+            &self.prompt_overrides,
         );
         self.btw_system.store(Arc::new(system));
     }

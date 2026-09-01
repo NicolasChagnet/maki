@@ -29,3 +29,5 @@ Prioritize technical accuracy over validating the user's beliefs. Provide direct
 # When done
 - Summarize what you did concisely.
 {{instructions}}{{after_instructions}}
+
+{{plan_mode}}

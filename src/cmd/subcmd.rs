@@ -671,7 +671,7 @@ pub fn prompt(
 ) -> Result<()> {
     use crate::cli::PromptVariant;
     use maki_agent::agent::{build_system_prompt, load_instruction_text};
-    use maki_agent::prompt::{PromptId, assemble};
+    use maki_agent::prompt::{PromptId, PromptOverrides, assemble_with_overrides};
     use maki_agent::template;
     use maki_agent::tools::{DescriptionContext, ToolAudience, ToolFilter, ToolRegistry};
     use maki_providers::Model;
@@ -722,6 +722,7 @@ pub fn prompt(
     let cwd_str = cwd.to_string_lossy();
     let instructions = load_instruction_text(&cwd_str);
     let slots = host.event_handle().collect_prompt_slots();
+    let overrides = PromptOverrides::load();
 
     let output = match variant {
         PromptVariant::System => {
@@ -736,10 +737,14 @@ pub fn prompt(
                 .as_deref()
                 .unwrap_or("anthropic/claude-sonnet-4-20250514");
             let model = Model::from_spec(model_spec).context("invalid default model")?;
-            build_system_prompt(&vars, &mode, &instructions, &slots, &model)
+            build_system_prompt(&vars, &mode, &instructions, &slots, &model, &overrides)
         }
-        PromptVariant::Research => assemble(PromptId::Research, &slots, &instructions),
-        PromptVariant::General => assemble(PromptId::General, &slots, &instructions),
+        PromptVariant::Research => {
+            assemble_with_overrides(PromptId::Research, &slots, &instructions, &overrides, None)
+        }
+        PromptVariant::General => {
+            assemble_with_overrides(PromptId::General, &slots, &instructions, &overrides, None)
+        }
     };
 
     print!("{output}");

@@ -336,6 +336,34 @@ On top of the project instruction files Maki loads from the git root down to the
 
 All of these are added to the system prompt at the start of every session.
 
+## System prompts
+
+Every part of the system prompt is a Markdown template you can override with files under the config directory:
+
+```
+~/.config/maki/prompts/
+  system.md              main System prompt template
+  plan.md                plan-mode reminder
+  research.md            research subagent template
+  general.md             general subagent template
+  compaction_system.md   compaction prompt
+  compaction_user.md     compaction user prompt
+```
+
+On first run Maki writes each file there with the shipped default, so you own the whole set. Existing files are never overwritten. If a file is missing later (for example a read-only config dir), Maki falls back to its built-in default.
+
+Resolution order per file: legacy `~/.maki/prompts/` first, then `~/.config/maki/prompts/`, matching how `AGENTS.md` is resolved.
+
+`system.md` is a template with markers; each marker is replaced or dropped when its content is empty:
+
+- `{{identity}}`, `{{tone}}`: singleton slots. Set these in Lua via `set_prompt`; they are not overridable by file.
+- `{{tool_usage}}`, `{{conventions}}`, `{{after_instructions}}`: additive slots filled by plugins via `register_prompt_hint`; your `system.md` keeps the markers.
+- `{{efficient_tools}}`: the native efficient-tools line plus plugin contributions.
+- `{{instructions}}`: project and personal instruction files.
+- `{{plan_mode}}`: plan-mode reminder. In plan mode Maki fills it with the plan text (from `plan.md` or the built-in default); otherwise the marker is dropped.
+
+Singleton slots (`{{identity}}`, `{{tone}}`) are set in Lua via `set_prompt`; the file-based templates above cover the rest. For most customization, edit the Markdown files. See [Lua API](/docs/lua-api/).
+
 ## Memory
 
 The `memory` tool and `/memory` command store small Markdown notes under the state directory, scoped per project:

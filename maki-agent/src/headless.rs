@@ -141,6 +141,7 @@ fn advertised_tool_names(tools: &Value, mcp: Option<&McpSession>) -> Vec<String>
 pub fn spawn(params: HeadlessParams) -> HeadlessHandle {
     let working_dir = params.initial_wd.to_string_lossy().into_owned();
     let mode = AgentMode::Build;
+    let overrides = crate::prompt::PromptOverrides::load();
     let AgentSetup {
         vars,
         instructions,
@@ -159,6 +160,7 @@ pub fn spawn(params: HeadlessParams) -> HeadlessHandle {
         &instructions.text,
         &params.prompt_slots,
         &params.model,
+        &overrides,
     );
 
     let mcp = params.mcp_handle.clone().map(|h| McpSession::new(h, &[]));
@@ -358,6 +360,7 @@ pub fn spawn_interactive(params: InteractiveParams) -> InteractiveHandle {
 
             let mut store = SessionStore::open(session_id, &working_dir, &model.spec());
             let mut history = History::restored(params.initial_history);
+            let overrides = crate::prompt::PromptOverrides::load();
             let mut run_id: u64 = 0;
 
             while let Ok(input) = input_rx.recv_async().await {
@@ -419,6 +422,7 @@ pub fn spawn_interactive(params: InteractiveParams) -> InteractiveHandle {
                         &instructions.text,
                         &params.prompt_slots,
                         &model,
+                        &overrides,
                     )
                 });
                 if let Some(append) = &params.append_system_prompt {

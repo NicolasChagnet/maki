@@ -7,6 +7,7 @@ use maki_providers::model::Model;
 
 use crate::AgentMode;
 use crate::command::find_project_ancestor_dirs;
+use crate::prompt::PromptOverrides;
 use crate::template::Vars;
 
 const INSTRUCTION_FILES: &[&str] = &[
@@ -57,20 +58,20 @@ pub fn build_system_prompt(
     instructions: &str,
     slots: &crate::prompt::ResolvedSlots,
     model: &Model,
+    overrides: &PromptOverrides,
 ) -> String {
     let env = vars.apply(
         "\n\nEnvironment:\n- Working directory: {cwd}\n- Platform: {platform}\n- Date: {date}",
     );
     let env = format!("{env}\n- Model: {}", model.spec());
     let instructions = format!("{env}{instructions}");
-    let mut out = crate::prompt::assemble(crate::prompt::PromptId::System, slots, &instructions);
-
-    if let Some(plan_path) = mode.plan_path() {
-        let plan_vars = Vars::new().set("{plan_path}", plan_path.display().to_string());
-        out.push_str(&plan_vars.apply(crate::prompt::PLAN_PROMPT));
-    }
-
-    out
+    crate::prompt::assemble_with_overrides(
+        crate::prompt::PromptId::System,
+        slots,
+        &instructions,
+        overrides,
+        mode.plan_path(),
+    )
 }
 
 fn read_instruction(path: &Path, loaded: &LoadedInstructions) -> Option<(PathBuf, String)> {
@@ -227,7 +228,8 @@ mod tests {
         let vars = Vars::new().set("{cwd}", "/tmp").set("{platform}", "linux");
         let slots = crate::prompt::ResolvedSlots::default();
         let model = Model::from_spec("anthropic/claude-sonnet-4-20250514").unwrap();
-        let prompt = build_system_prompt(&vars, mode, "", &slots, &model);
+        let prompt =
+            build_system_prompt(&vars, mode, "", &slots, &model, &PromptOverrides::default());
         assert_eq!(prompt.contains("Plan Mode"), expect_plan);
         if expect_plan {
             assert!(prompt.contains(PLAN_PATH));
@@ -255,6 +257,7 @@ mod tests {
             &format!("\n{INSTR}"),
             &slots,
             &Model::from_spec("anthropic/claude-sonnet-4-20250514").unwrap(),
+            &PromptOverrides::default(),
         );
         let positions = [INSTR, EXTRA, "Plan Mode"].map(|n| prompt.find(n).unwrap());
         assert!(
