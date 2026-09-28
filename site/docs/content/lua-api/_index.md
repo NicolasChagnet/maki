@@ -3633,6 +3633,36 @@ maki.keymap.set("n", "<M-t>", function() maki.model.set({ thinking = "" }) end)
 
 ---
 
+### `maki.model.tier()` {#maki-model-tier}
+
+```lua
+maki.model.tier({name}, {provider?})
+```
+
+The model maki uses for a tier, the same one a subagent asking for that
+tier gets: your pick from the `/model` picker, else the curated default.
+`assigned` tells the two apart. Pass `provider` to prefer its models, the
+way subagents prefer the session's provider.
+
+**Parameters:**
+
+- `{name}` (`string`) `"weak"`, `"medium"`, `"strong"`, or `"compaction"`.
+- `{provider?}` (`string|nil`) Provider slug to resolve within first.
+
+**Returns:** (`table|nil`, `string|nil`) The model in the shape `info` returns, plus
+  `assigned` (boolean), true when you picked it for this tier. nil and nil
+  when no model fits the tier, nil and an error when the spec no longer
+  resolves.
+
+**Example:**
+
+```lua
+local m = maki.model.tier("weak", maki.model.get().provider)
+if m then maki.model.set(m.spec) end
+```
+
+---
+
 ### `maki.model.info()` {#maki-model-info}
 
 ```lua
